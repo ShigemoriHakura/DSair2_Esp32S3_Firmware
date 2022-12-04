@@ -15,15 +15,11 @@
  */
  
 #include "TrackReporterS88_DS.h"
-
+#include "Define.h"
 // ===================================================================
 // === TrackReporterS88_DS ==============================================
 // ===================================================================
 
-const int DATA = A0;
-const int CLOCK = 6;
-const int LOAD = 5;
-const int RESET = A3;
 	
 const int TIME = 50;
 const int TIME_HALF = 25;
@@ -32,11 +28,11 @@ TrackReporterS88_DS::TrackReporterS88_DS(int modules)
 {
 	mSize = modules;
 	
-	pinMode(DATA, INPUT);
+	pinMode(PIN_S88_DATA, INPUT);
 	
-	pinMode(CLOCK, OUTPUT);
-	pinMode(LOAD, OUTPUT);
-	pinMode(RESET, OUTPUT);
+	pinMode(PIN_S88_CLOCK, OUTPUT);
+	pinMode(PIN_S88_LOAD, OUTPUT);
+	pinMode(PIN_S88_RESET, OUTPUT);
 }
 
 void TrackReporterS88_DS::refresh()
@@ -65,32 +61,32 @@ void TrackReporterS88_DS::refresh(int inMaxSize)
 		mSwitches[i] = 0;
 	}
 
-	digitalWrite(LOAD, HIGH);
-	delayMicroseconds( TIME);
+	digitalWrite(PIN_S88_LOAD, HIGH);
+	delayMicroseconds(TIME);
 	
-	digitalWrite(CLOCK, HIGH);
+	digitalWrite(PIN_S88_CLOCK, HIGH);
 	delayMicroseconds(TIME);
-	digitalWrite(CLOCK, LOW);
+	digitalWrite(PIN_S88_CLOCK, LOW);
 	delayMicroseconds(TIME);
-	digitalWrite(RESET, HIGH);
+	digitalWrite(PIN_S88_RESET, HIGH);
 	delayMicroseconds(TIME);
-	digitalWrite(RESET, LOW);
+	digitalWrite(PIN_S88_RESET, LOW);
 	delayMicroseconds(TIME);
-	digitalWrite(LOAD, LOW);
+	digitalWrite(PIN_S88_LOAD, LOW);
 
 	delayMicroseconds(TIME_HALF);
-	bitWrite(mSwitches[myByte], myBit++, digitalRead(DATA));
+	bitWrite(mSwitches[myByte], myBit++, digitalRead(PIN_S88_DATA));
 	delayMicroseconds(TIME_HALF);
 
 	
 	for (int i = 1; i < aCntMax; i++) 
 	{
-		digitalWrite(CLOCK, HIGH);
+		digitalWrite(PIN_S88_CLOCK, HIGH);
 		delayMicroseconds(TIME);
-		digitalWrite(CLOCK, LOW);
+		digitalWrite(PIN_S88_CLOCK, LOW);
 
 		delayMicroseconds(TIME_HALF);
-		bitWrite(mSwitches[myByte], myBit++, digitalRead(DATA));
+		bitWrite(mSwitches[myByte], myBit++, digitalRead(PIN_S88_DATA));
 
 		if (myBit == 8) {
 			myByte++;

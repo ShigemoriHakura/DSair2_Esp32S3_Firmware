@@ -2,6 +2,7 @@
    Desktop Station air Sketch for DSair Hardware Platform
 
    Copyright (C) 2018 DesktopStation Co.,Ltd. / Yaasan
+   Copyright (C) 2022 ShiroSaki
    https://desktopstation.net/
 */
 
@@ -19,7 +20,6 @@
 #include "DSCoreM_MM2.h"
 #include "DSCoreM.h"
 #include "Functions.h"
-#include "FlashAirSharedMem.h"
 #include "TrackReporterS88_DS.h"
 
 #define FIRMWARE_VER   '8' /* 0-9, a-z, A-Z*/
@@ -63,6 +63,7 @@
 
 #define MAX_LOCSTATUS_WEB	8
 
+String WebInCommand = "";
 
 #define ADC_SHIFT 2
 
@@ -98,7 +99,6 @@ uint8_t buffer_accessories[SHAREMEM_ACCSIZE];
 /* 機関車データ確認 */
 DATA_LOC gLocStatus[MAX_LOCSTATUS_WEB];
 
-/* FlashAir接続確認 */
 byte gFlag_FlashAir;
 byte gFlag_Serial = TIMEOUT_SERIAL;
 uint8_t gFlashAirAccess = 0;
@@ -147,12 +147,7 @@ unsigned long gPreviousL8 = 0; // 1000ms interval
 void SetAnalogSpeed(word inSpeed, byte inDir);
 void printString(const char *s, int x, int y);
 void ReplyPowerPacket(byte inPower);
-boolean SDIO_ReadSharedMem();
-boolean SDIO_WriteSharedMem_Status();
 boolean SDIO_WriteSharedMem_CVReply(word inCVNo, uint8_t inValue);
-void SDIO_ClearSharedMem();
-int8_t SharedMemRead2(uint16_t adr, uint16_t len, uint8_t buf[]);
-int8_t SharedMemWrite2(uint16_t adr, uint16_t len, uint8_t buf[]);
 
 
 void LOCMNG_Clear(void);
@@ -194,8 +189,8 @@ void setup()
   pinMode(PIN_ALERT, INPUT);
   digitalWrite(PIN_ALERT, HIGH);
 
-  pinMode(PIN_S88CHK, INPUT);
-  digitalWrite(PIN_S88CHK, HIGH);
+  pinMode(PIN_S88_DATA, INPUT);
+  digitalWrite(PIN_S88_DATA, HIGH);
 
   /* DSCore初期化 */
   DSCore.Init();
@@ -212,65 +207,22 @@ void setup()
   gHardware = HW_DSAIR2;
   gThreshold_OV = THRESHOLD_OV_DSA;
   gThreshold_LV = THRESHOLD_EDC_DSA;
-  
+
   /* PULLUPを解除 */
-  digitalWrite(PIN_S88CHK, LOW);
+  digitalWrite(PIN_S88_DATA, LOW);
 
   /* 共有メモリクリア */
   ClearShareMem();
 
-  switch (gHardware)
-  {
-    case HW_DSS1:
-      Serial.println(F("HW: DSshield"));
-      break;
-    case HW_DSAIR1:
-      Serial.println(F("HW: DSair1"));
-      break;
-    case HW_DSAIR2:
-      Serial.println(F("HW: DSair2"));
-      break;
-  }
+  Serial.println(F("HW: DSair2(ESP32S3)"));
+
   Serial.println(F("-------------"));
 
   // Initialize SD card.
-  Serial.print(F("Init SD card..."));
+  Serial.print(F("Init SD card...But no SD"));
 
-  if (SharedMemInit(PIN_SPI_CS) >= 0)
-  {
-    Serial.println(F("OK"));
-    gFlag_FlashAir = 1;
-
-    //共有メモリをクリア
-    SDIO_ClearSharedMem();
-    SDIO_WriteSharedMem_Status();
-
-  } else {
-
-    Serial.println(F("Retry"));
-
-    /* Retry */
-    delay(500);
-
-    if (SharedMemInit(PIN_SPI_CS) >= 0)
-    {
-      Serial.println(F("OK"));
-      gFlag_FlashAir = 1;
-
-      //共有メモリをクリア
-      SDIO_ClearSharedMem();
-      SDIO_WriteSharedMem_Status();
-    }
-    else
-    {
-      /* 失敗 */
-      Serial.println(F("NG"));
-      gFlag_FlashAir = 0;
-      gLED_State = LEDSTATE_NOSD;
-    }
-
-
-  }
+  Serial.println(F("OK"));
+  gFlag_FlashAir = 1;
 
   gFlag_FlashAir = 0;
   gLED_State = LEDSTATE_NOSD;
@@ -589,9 +541,6 @@ boolean dispatch()
     //Clear last CV data
     SDIO_WriteSharedMem_CVReply(0, 0);
 
-    //Send to FlashAir Shared Memory
-    SDIO_WriteSharedMem_Status();
-
     /* LED turn on */
     digitalWrite(PIN_RUNLED, HIGH);
 
@@ -613,25 +562,18 @@ boolean dispatch()
     {
       Serial.print(aValue);
 
-      //Write to FlashAir
       SDIO_WriteSharedMem_CVReply(arguments[1], aValue);
-      SDIO_WriteSharedMem_Status();
     }
     else
     {
       Serial.print(0xFFFF);
 
-      //Write to FlashAir
       SDIO_WriteSharedMem_CVReply(0, 255);//255 is error no (Read. but not found)
-      SDIO_WriteSharedMem_Status();
     }
 
     Serial.println(",");
     /* LED turn off */
     changeLED();
-
-    //FlashAir 共有メモリSPI送信
-    SDIO_WriteSharedMem_Status();
 
 
     return true;
@@ -702,9 +644,6 @@ boolean dispatch()
     //Clear last CV data
     SDIO_WriteSharedMem_CVReply(0, 0);
 
-    //Send to FlashAir Shared Memory
-    SDIO_WriteSharedMem_Status();
-
     /* LED turn on */
     digitalWrite(PIN_RUNLED, HIGH);
 
@@ -715,7 +654,6 @@ boolean dispatch()
 
     //Write to FlashAir
     SDIO_WriteSharedMem_CVReply(arguments[1], arguments[2]);
-    SDIO_WriteSharedMem_Status();
 
 
     /* LED turn off */
@@ -873,9 +811,6 @@ void loop()
 
     //パルスジェネレータのスキャン
     DSCore.Scan();
-
-    //FlashAir 共有メモリSPI送信
-    SDIO_WriteSharedMem_Status();
   }
 
   //FlashAir 有り無しの処理分岐
@@ -891,62 +826,40 @@ void loop()
     if ( gFlashAirAccess == 0)
     {
 
-      /* コマンド受信＆処理 */
-      boolean aRecvShareMem = SDIO_ReadSharedMem();
-
-      if ( aRecvShareMem == true)
+      gRequest = WebInCommand;
+      WebInCommand = "";
+      if (parse())
       {
-        //データをシリアルに流し込む
-        gRequest = "";
+#ifdef DEBUG
+        Serial.println(gRequest);
+#endif
 
-        for ( int i = 0; i < SHAREMEM_SIZE; i++)
-        {
-          if ( buffer_sharedMem[i] != ')' )
-          {
-            char aWord = (char)(buffer_sharedMem[i]);
-
-            gRequest = gRequest + aWord;
-          }
-          else
-          {
-            gRequest = gRequest + ")";
-            break;
-          }
-        }
-
-        if (parse())
+        if (dispatch())
         {
 #ifdef DEBUG
-          Serial.println(gRequest);
+          Reply200();
 #endif
-
-          if (dispatch())
-          {
-#ifdef DEBUG
-            Reply200();
-#endif
-          }
-          else
-          {
-#ifdef DEBUG
-            Reply300();
-#endif
-          }
         }
         else
         {
 #ifdef DEBUG
-          Reply301();
+          Reply300();
 #endif
         }
-
       }
       else
       {
-        /* Nothing to do */
-
-
+#ifdef DEBUG
+        Reply301();
+#endif
       }
+
+    }
+    else
+    {
+      /* Nothing to do */
+
+
     }
   }
 
@@ -1203,105 +1116,6 @@ void FreeAnalogSpeed()
 {
   analogWrite(PIN_PWMB, 0);
   analogWrite(PIN_PWMA, 0);
-}
-
-void SDIO_ClearSharedMem()
-{
-  //Clear Buffer
-  memset(buffer_sharedMem, 0, SHAREMEM_SIZE);
-
-  if ( SharedMemWrite2( 0, SHAREMEM_SIZE, buffer_sharedMem))
-  {
-    Serial.println(F("\nwrite err"));
-    return;
-  }
-
-  //Update LastCommandBuffer
-  for ( byte i = 0; i < SHAREMEM_SIZE; i++)
-  {
-    buffer_lastcmd[i] = 0;
-  }
-
-}
-
-boolean SDIO_ReadSharedMem()
-{
-  boolean aResultFnc = false;
-  uint8_t aChk = 0;
-
-  if ( gFlag_FlashAir == 0)
-  {
-    return aResultFnc;
-  }
-
-  //Clear Buffer
-  //memset(buffer_sharedMem, 0, SHAREMEM_SIZE);
-
-  if ( SharedMemRead2(0, SHAREMEM_SIZE, buffer_sharedMem))
-  {
-    Serial.println("\nread err");
-    return false;
-  }
-
-  //Check between received command and last one.
-  for ( byte i = 0; i < SHAREMEM_SIZE; i++)
-  {
-    if ( buffer_sharedMem[i] == 0x00)
-    {
-      break;
-    }
-
-    if ( buffer_lastcmd[i] != buffer_sharedMem[i])
-    {
-      aChk++;
-      break;
-    }
-  }
-
-  if ( buffer_sharedMem[0] == 0x00)
-  {
-    //Shared memory is empty
-    aResultFnc = false;
-  }
-  else if ( aChk == 0)
-  {
-    //Same command received.
-    aResultFnc = false;
-  }
-  else
-  {
-    aResultFnc = true;
-
-    //Update LastCommandBuffer
-    for ( byte i = 0; i < SHAREMEM_SIZE; i++)
-    {
-      buffer_lastcmd[i] = buffer_sharedMem[i];
-    }
-
-  }
-
-  return aResultFnc;
-}
-
-
-boolean SDIO_WriteSharedMem_Status()
-{
-
-  if ( gFlag_FlashAir == 0)
-  {
-    return false;
-  }
-
-  if ( SharedMemWrite2( 0x80, SHAREMEM_STATUS_SIZE, buffer_sharedStatusMem))
-  {
-    Serial.println(F("\nwrite err"));
-
-    return false;
-  }
-  else
-  {
-    return true;
-  }
 }
 
 void ClearShareMem()
@@ -1848,87 +1662,4 @@ void changedPowerStatus(const byte inPower)
 
   DSCore.SetPower(inPower);
 
-}
-
-
-//FlashAirアクセス時のオーバーヘッド対策用
-int8_t SharedMemRead2(uint16_t adr, uint16_t len, uint8_t buf[])
-{
-  if (adr + len > 512)
-    return -1;
-  if (len == 0)
-    return -1;
-
-  uint32_t sd_adr = 0x1000 + adr;
-  uint32_t arg = 0x90000000 | ((sd_adr & 0x1FFFF) << 9) | ((len - 1) & 0x1FF);
-
-  DSCore.TogglePulse();
-
-  if (sd_cmd(17, arg) != 0)
-  {
-    return -2;
-  }
-
-  DSCore.TogglePulse();
-
-  while ((SPI.transfer(0xFF)) != 0xFE);
-
-  for (uint16_t i = 0; i < 514; i++) {
-    if (i < len) {
-      buf[i] = SPI.transfer(0xFF);
-    } else {
-      SPI.transfer(0xFF);
-    }
-
-    DSCore.TogglePulse();
-  }
-  cs_release();
-  return 0;
-}
-
-
-int8_t SharedMemWrite2(uint16_t adr, uint16_t len, uint8_t buf[])
-{
-  if (adr + len > 512)
-    return -1;
-  if (len == 0)
-    return -1;
-
-  uint32_t sd_adr = 0x1000 + adr;
-  uint32_t arg = 0x90000000 | ((sd_adr & 0x1FFFF) << 9) | ((len - 1) & 0x1FF);
-
-  DSCore.TogglePulse();
-
-  if (sd_cmd(24, arg) != 0)
-  {
-    return -2;
-  }
-
-  DSCore.TogglePulse();
-  spi_trans(0xFE); //BLOCK START
-
-  for (uint16_t i = 0; i < 512; i++) {
-    if (i < len) {
-      spi_trans(buf[i]);
-    } else {
-      spi_trans(0xFF);
-    }
-    DSCore.TogglePulse();
-  }
-
-  //CRC
-  spi_trans(0xFF);
-  spi_trans(0xFF);
-
-  //Ans
-  if ((spi_trans(0xFF) & 0x1F) != 0x05) //DATA ACCEPTED
-  {
-    return -3;
-  }
-
-  //Wait for Busy
-  while (spi_trans(0xFF) == 0x00);
-
-  cs_release();
-  return 0;
 }
