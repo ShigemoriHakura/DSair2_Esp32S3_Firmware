@@ -21,6 +21,7 @@
 #include "DSCoreM.h"
 #include "Functions.h"
 #include "TrackReporterS88_DS.h"
+#include "web.h"
 
 #define FIRMWARE_VER   '8' /* 0-9, a-z, A-Z*/
 
@@ -101,7 +102,6 @@ DATA_LOC gLocStatus[MAX_LOCSTATUS_WEB];
 
 byte gFlag_FlashAir;
 byte gFlag_Serial = TIMEOUT_SERIAL;
-uint8_t gFlashAirAccess = 0;
 
 /* Decralation classes */
 DSCoreLib DSCore;
@@ -156,6 +156,7 @@ byte LOCMNG_SetLocoDir(word inAddr, byte inDir);
 byte LOCMNG_SetLocoFunc(word inAddr, byte inNo, byte inPower);
 void LOCMNG_UpdateAcc(word inNo);
 
+String GetStatusString();
 /***********************************************************************
 
   Boot setup
@@ -169,6 +170,9 @@ void setup()
   Serial.begin(115200);
 
   Serial.println("Desktop Station air");
+
+  init_web();
+  delay(1000);
 
   //初期化
   LOCMNG_Clear();
@@ -219,13 +223,11 @@ void setup()
   Serial.println(F("-------------"));
 
   // Initialize SD card.
-  Serial.print(F("Init SD card...But no SD"));
+  Serial.print(F("Init SD card...But no SD needed~"));
 
   Serial.println(F("OK"));
   gFlag_FlashAir = 1;
-
-  gFlag_FlashAir = 0;
-  gLED_State = LEDSTATE_NOSD;
+  gLED_State = LEDSTATE_STOP;
   /* LED turn on */
   changeLED();
 
@@ -816,16 +818,7 @@ void loop()
   //FlashAir 有り無しの処理分岐
   if ( gFlag_FlashAir != 0)
   {
-    gFlashAirAccess++;
-
-    if ( gFlashAirAccess > 4)
-    {
-      gFlashAirAccess = 0;
-    }
-
-    if ( gFlashAirAccess == 0)
-    {
-
+    if (WebInCommand != "") {
       gRequest = WebInCommand;
       WebInCommand = "";
       if (parse())
@@ -853,13 +846,6 @@ void loop()
         Reply301();
 #endif
       }
-
-    }
-    else
-    {
-      /* Nothing to do */
-
-
     }
   }
 
@@ -959,8 +945,8 @@ void ScanS88(void)
 
 void PowerOffByErr(uint8_t inErrNo)
 {
-  Serial.print("ERR:");
-  Serial.println(inErrNo);
+  //Serial.print("ERR:");
+  //Serial.println(inErrNo);
   DSCore.SetPower(0);
   delay(10);
   ReplyPowerPacket(0);
@@ -1662,4 +1648,14 @@ void changedPowerStatus(const byte inPower)
 
   DSCore.SetPower(inPower);
 
+}
+
+//Return just like a flashAir
+String GetStatusString() {
+  String returnStr = "";
+  for ( int i = 0; i < 264; i++)
+  {
+    returnStr = returnStr + char(buffer_sharedStatusMem[i]);
+  }
+  return returnStr;
 }
