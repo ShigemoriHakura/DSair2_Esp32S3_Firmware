@@ -49,9 +49,10 @@
 #define SHAREMEM_STATUS_SIZE 264 //32 + 16 + 32x2 + 19 * 8= 112 + 144=264
 #define SHAREMEM_ACCSIZE 32
 
-#define THRESHOLD_EDC     276   // 1024d * (1.2 / 8) * 9V / 5V
-#define THRESHOLD_EDC_DSA 375   // 1024d * (1.2 / 5.9) * 9V / 5V
-#define THRESHOLD_OV_DSA  999   // 1024d * (1.2 / 5.9) * 20V / 5V
+#define THRESHOLD_EDC     276
+#define THRESHOLD_EDC_DSA 375
+//#define THRESHOLD_OV_DSA  2700
+#define THRESHOLD_OV_DSA  3800
 
 #define HW_DSS1		0
 #define HW_DSAIR1	1
@@ -65,8 +66,6 @@
 #define MAX_LOCSTATUS_WEB	8
 
 String WebInCommand = "";
-
-#define ADC_SHIFT 2
 
 
 typedef struct {
@@ -718,7 +717,9 @@ void loop()
     if ( gSwSensor == 0)
     {
       gSwSensor = 1;
-      gEdc_data = analogRead(PIN_EDC) >> ADC_SHIFT;
+
+      //Changed R7 to 1K (Should change to 500R later)
+      gEdc_data = analogRead(PIN_EDC);
 
       /* OV check */
       if ( gEdc_data > gThreshold_OV )
@@ -733,14 +734,14 @@ void loop()
 
       }
 
-      // 1024d * (1.2 / 5.9) * Y[V] / 5[V] = X
-      // ->
-      aEdc = (((long)gEdc_data * 246) >> 10);
+      //V1 = (R1 + R2) * Vout / R2
+      aEdc = gEdc_data * 330 / 4096 * (4700 + 1000) / 1000 / 10;
 
       if ( aEdc > 255)
       {
         aEdc = 255;
       }
+
       //Sensor Write
       RegisterShareMem(SMEM_EDC, aEdc);
 
@@ -748,7 +749,7 @@ void loop()
     else
     {
       gSwSensor = 0;
-      gCur_data = analogRead(PIN_CURRENT) >> ADC_SHIFT;
+      gCur_data = analogRead(PIN_CURRENT);
       /* 電流の向きを正規化 */
       if ( gCur_data >= gOffset_Current)
       {
@@ -1070,6 +1071,8 @@ void taskLED(void)
 void SetAnalogSpeed(word inSpeed, byte inDir)
 {
 
+  pinMode(PIN_PWMA, OUTPUT);
+  pinMode(PIN_PWMB, OUTPUT);
   word aSpeed = inSpeed >> 2;
 
   if ( aSpeed > 255)
@@ -1320,7 +1323,7 @@ void CalcCurrentOffset()
 
       for ( int i = 0; i < 4; i++)
       {
-        aCurrentSum = aCurrentSum + (analogRead(PIN_CURRENT) >> ADC_SHIFT);
+        aCurrentSum = aCurrentSum + (analogRead(PIN_CURRENT));
         delay(10);
       }
 
